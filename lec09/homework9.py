@@ -1,52 +1,77 @@
 import numpy as np
 
 def VAD(waveform, Fs):
-    '''
-    Extract the segments that have energy greater than 10% of maximum.
-    Calculate the energy in frames that have 25ms frame length and 10ms frame step.
     
-    @params:
-    waveform (np.ndarray(N)) - the waveform
-    Fs (scalar) - sampling rate
+    frame_length = int(0.025 * Fs)
+    step = int(0.010 * Fs)
+
+    frames = waveform_to_frames(waveform, frame_length, step)
+    energy = np.sum(frames**2, axis=1)
     
-    @returns:
-    segments (list of arrays) - list of the waveform segments where energy is 
-       greater than 10% of maximum energy
-    '''
-    raise RuntimeError("You need to change this part")
+    threshold = 0.1 * np.amax(energy)
+    mask = energy > threshold
+
+    segments = []
+    n = len(mask)
+    i = 0
+    
+    while i < n:
+        if mask[i]:
+            j = i
+            while j < n and mask[j]:
+                j += 1
+          
+            start = i * step
+            end = (j - 1) * step + frame_length
+            segments.append(waveform[start:end])
+            i = j
+        else:
+            i += 1
+
+    return segments
+
 
 def segments_to_models(segments, Fs):
-    '''
-    Create a model spectrum from each segment:
-    Pre-emphasize each segment, then calculate its spectrogram with 4ms frame length and 2ms step,
-    then keep only the low-frequency half of each spectrum, then average the low-frequency spectra
-    to make the model.
-    
-    @params:
-    segments (list of arrays) - waveform segments that contain speech
-    Fs (scalar) - sampling rate
-    
-    @returns:
-    models (list of arrays) - average log spectra of pre-emphasized waveform segments
-    '''
-    raise RuntimeError("You need to change this part")
+ 
+    frame_length = int(0.004 * Fs)
+    step = int(0.002 * Fs)
+
+    models = []
+    for segment in segments:
+      
+        preemph = np.append(segment[0], segment[1:] - 0.95 * segment[:-1])
+
+        frames = waveform_to_frames(preemph, frame_length, step)
+        mstft = frames_to_mstft(frames)
+        spectrogram = mstft_to_spectrogram(mstft)
+
+        half = frame_length // 2
+        low_freq = spectrogram[:, :half]
+
+        model = np.mean(low_freq, axis=0)
+        models.append(model)
+
+    return models
+
 
 def recognize_speech(testspeech, Fs, models, labels):
-    '''
-    Chop the testspeech into segments using VAD, convert it to models using segments_to_models,
-    then compare each test segment to each model using cosine similarity,
-    and output the label of the most similar model to each test segment.
-    
-    @params:
-    testspeech (array) - test waveform
-    Fs (scalar) - sampling rate
-    models (list of Y arrays) - list of model spectra
-    labels (list of Y strings) - one label for each model
-    
-    @returns:
-    sims (Y-by-K array) - cosine similarity of each model to each test segment
-    test_outputs (list of strings) - recognized label of each test segment
-    '''
-    raise RuntimeError("You need to change this part")
+   
+    test_segments = VAD(testspeech, Fs)
+    test_models = segments_to_models(test_segments, Fs)
 
+    Y = len(models)
+    K = len(test_models)
+    sims = np.zeros((Y, K))
 
+    for y in range(Y):
+        a = models[y]
+        for k in range(K):
+            b = test_models[k]
+            sims[y, k] = np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
+
+    test_outputs = []
+    for k in range(K):
+        best_y = np.argmax(sims[:, k])
+        test_outputs.append(labels[best_y])
+
+    return sims, test_outputs
